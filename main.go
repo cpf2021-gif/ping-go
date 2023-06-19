@@ -8,6 +8,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
+	"regexp"
 	"time"
 )
 
@@ -81,9 +83,9 @@ func GetCommandArgs() {
 }
 
 func PrintResult() {
-	fmt.Printf("数据包: 已发送 = %d, 已接收 = %d  丢包率: %.2f%%\n", int(numPack), (int(numPack) - int(dropPack)), float64(dropPack)/float64(numPack)*100)
+	fmt.Printf("数据包: 已发送 = %d, 已接收 = %d  丢包率: %.2f %% \n", int(numPack), (int(numPack) - int(dropPack)), float64(dropPack)/float64(numPack)*100)
 	if len(ret_list) == 0 {
-		fmt.Printf("没有收到任何回复...")
+		fmt.Println("没有收到任何回复...")
 	} else {
 		sum := 0.0
 		for _, n := range ret_list {
@@ -145,10 +147,12 @@ func PingLoop(conn *net.IPConn, raddr *net.IPAddr, seq uint16) error {
 
 func Ping(url string) {
 	// 解析域名
-	var (
-		laddr    = net.IPAddr{IP: net.ParseIP("0.0.0.0")}
-		raddr, _ = net.ResolveIPAddr("ip", url)
-	)
+	var laddr = net.IPAddr{IP: net.ParseIP("0.0.0.0")}
+	var raddr, err = net.ResolveIPAddr("ip", url)
+
+	if err != nil {
+		log.Fatal("域名解析发生错误")
+	}
 
 	// 创建连接
 	conn, err := net.DialIP("ip4:icmp", &laddr, raddr)
@@ -175,32 +179,57 @@ func Ping(url string) {
 }
 
 func main() {
-	// 不能同时 -n 和 -t
-	GetCommandArgs()
-	if count != 4 && *isloop {
-		log.Fatal("参数错误, -n 和 -t 不能同时使用")
-	}
+	// 创建一个用于接收中断信号的通道
+	interruptChan := make(chan os.Signal, 1)
+	signal.Notify(interruptChan, os.Interrupt)
 
-	// 判断是否有无效参数
-	if timeout < 0 || size < 0 || count < 0 {
-		log.Fatal("参数设置错误")
-	}
+	// 创建一个用于结束程序的通道
+	doneChan := make(chan struct{})
 
-	// 功能说明
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: goping [-w timeout] [-l bytes] [-n count] [-t] host")
-		fmt.Println("Options:")
-		fmt.Println("  -w timeout    指定超时时间，单位为毫秒")
-		fmt.Println("  -l bytes      指定发送的字节数")
-		fmt.Println("  -n count      指定要发送的回显请求数")
-		fmt.Println("  -t            无限循环发送请求，直到手动停止")
-		return
-	}
+	// 监听中断信号
+	go func() {
+		<-interruptChan
+		PrintResult()
+		close(doneChan)
+	}()
 
-	url := os.Args[len(os.Args)-1]
-	//TODO: 判断是否是域名
+	// 主体
+	go func() {
+		// 不能同时 -n 和 -t
+		GetCommandArgs()
+		if count != 4 && *isloop {
+			log.Fatal("参数错误, -n 和 -t 不能同时使用")
+		}
 
-	Ping(url)
-	// TODO: 解决ctrl + c 时不执行的问题
-	defer PrintResult()
+		// 判断是否有无效参数
+		if timeout < 0 || size < 0 || count < 0 {
+			log.Fatal("参数设置错误")
+		}
+
+		// 功能说明
+		if len(os.Args) < 2 {
+			fmt.Println("Usage: goping [-w timeout] [-l bytes] [-n count] [-t] domain")
+			fmt.Println("Options:")
+			fmt.Println("  -w timeout    指定超时时间，单位为毫秒")
+			fmt.Println("  -l bytes      指定发送的字节数")
+			fmt.Println("  -n count      指定要发送的回显请求数")
+			fmt.Println("  -t            无限循环发送请求，直到手动停止")
+			return
+		}
+
+		url := os.Args[len(os.Args)-1]
+		// www.xx.xx
+		pattern := `^www(\.[a-zA-Z0-9\-]+){2}$`
+		regexpObj, _ := regexp.Compile(pattern)
+
+		if !regexpObj.MatchString(url) {
+			log.Fatal("错误的域名参数/无域名参数")
+		}
+
+		Ping(url)
+		PrintResult()
+		close(doneChan)
+	}()
+
+	<-doneChan
 }

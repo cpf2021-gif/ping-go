@@ -214,6 +214,7 @@ func main() {
 			fmt.Println("  -l bytes      指定发送的字节数")
 			fmt.Println("  -n count      指定要发送的回显请求数")
 			fmt.Println("  -t            无限循环发送请求，直到手动停止")
+			close(doneChan)
 			return
 		}
 

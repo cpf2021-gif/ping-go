@@ -18,10 +18,11 @@ const (
 )
 
 var (
-	timeout int64
-	size    int
-	count   int
-	isloop  *bool
+	timeout int64  // 超时时间
+	size    int    // 发送的数据包的大小
+	count   int    // 发送请求的次数
+	isloop  *bool  // 无限请求
+	srcaddr string // 发送的源地址
 )
 
 var (
@@ -43,6 +44,7 @@ func init() {
 	}
 }
 
+// 查询报文
 type ICMP struct {
 	Type        uint8  // 8请求 0应答
 	Code        uint8  // echo 0
@@ -76,8 +78,9 @@ func CheckSum(data []byte) uint16 {
 
 func GetCommandArgs() {
 	flag.Int64Var(&timeout, "w", 1000, "Timeout")
-	flag.IntVar(&size, "s", 56, "Size")
+	flag.IntVar(&size, "l", 56, "Size")
 	flag.IntVar(&count, "n", 4, "Count")
+	flag.StringVar(&srcaddr, "S", "172.17.0.1", "Srcaddr")
 	isloop = flag.Bool("t", false, "Loop")
 	flag.Parse()
 }
@@ -105,6 +108,8 @@ func PingLoop(conn *net.IPConn, raddr *net.IPAddr, seq uint16) error {
 		Identifier:  0,
 		SequenceNum: seq,
 	}
+
+	// 不需要设置IP首部，底层的网络协议栈会自动添加 IP 首部
 
 	// 序列化 ICMP
 	var buffer bytes.Buffer
@@ -147,21 +152,31 @@ func PingLoop(conn *net.IPConn, raddr *net.IPAddr, seq uint16) error {
 
 func Ping(url string) {
 	// 解析域名
-	var laddr = net.IPAddr{IP: net.ParseIP("0.0.0.0")}
-	var raddr, err = net.ResolveIPAddr("ip", url)
+	var ip net.IP
+
+	if srcaddr != "" {
+		ip = net.ParseIP(srcaddr)
+		if ip == nil {
+			log.Fatal("无效的IP地址")
+		}
+	}
+
+	var raddr, err = net.ResolveIPAddr("ip4", url)
 
 	if err != nil {
 		log.Fatal("域名解析发生错误")
 	}
 
-	// 创建连接
-	conn, err := net.DialIP("ip4:icmp", &laddr, raddr)
+	// 创建原始的IP数据报连接
+	var conn *net.IPConn
+	laddr := net.IPAddr{IP: ip}
+	conn, err = net.DialIP("ip4:icmp", &laddr, raddr)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("\n正在 Ping %s [%s] 具有 %d(%d) 字节的数据:\n", url, raddr.String(), size, size+8)
+	fmt.Printf("[%s] 正在 Ping %s [%s] 具有 %d(%d) 字节的数据:\n", srcaddr, url, raddr.String(), size, size+20+8)
 
 	defer conn.Close()
 
@@ -197,6 +212,7 @@ func main() {
 	go func() {
 		// 不能同时 -n 和 -t
 		GetCommandArgs()
+
 		if count != 4 && *isloop {
 			log.Fatal("参数错误, -n 和 -t 不能同时使用")
 		}
@@ -204,6 +220,11 @@ func main() {
 		// 判断是否有无效参数
 		if timeout < 0 || size < 0 || count < 0 {
 			log.Fatal("参数设置错误")
+		}
+
+		// timeout > 10
+		if timeout < 10 {
+			log.Fatal("超时时间太短")
 		}
 
 		// 功能说明
@@ -214,6 +235,7 @@ func main() {
 			fmt.Println("  -l bytes      指定发送的字节数")
 			fmt.Println("  -n count      指定要发送的回显请求数")
 			fmt.Println("  -t            无限循环发送请求，直到手动停止")
+			fmt.Println("  -S srcaddr    指定原地址")
 			close(doneChan)
 			return
 		}

@@ -135,6 +135,15 @@ func PrintResult() {
 	}
 }
 
+func OneLoop(conn *net.IPConn, seq uint16) {
+	if err := PingLoop(conn, uint16(numPack)); err != nil {
+		numPack++
+		dropPack++
+	} else {
+		numPack++
+	}	
+}
+
 func PingLoop(conn *net.IPConn, seq uint16) error {
 	// 初始化 ICMP
 	icmp := ICMP{
@@ -230,16 +239,17 @@ func Ping(url string) {
 
 	defer conn.Close()
 
-	// 循环发送
-	for *isloop || count > 0 {
-		if err := PingLoop(conn, uint16(numPack)); err != nil {
-			numPack++
-			dropPack++
-		} else {
-			numPack++
+	if *isloop {
+		for {
+			OneLoop(conn, uint16(numPack))
+			time.Sleep(1000 * time.Millisecond)
 		}
-		count--
-		time.Sleep(1000 * time.Millisecond)
+	} else {
+		for count > 0 {
+			OneLoop(conn, uint16(numPack))
+			count--
+			time.Sleep(1000 * time.Millisecond)
+		}
 	}
 }
 

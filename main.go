@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	MAX_DATA = 2000
+	MAX_DATA = 1392
 )
 
 var (
@@ -37,10 +37,20 @@ var (
 	originBytes []byte
 )
 
+var (
+	ipHeader IP = IP{
+		Version:  69,
+		TOS:      0,
+		Flags:    0,
+		TTL:      56,
+		Protocol: 1,
+	}
+)
+
 func init() {
 	originBytes = make([]byte, MAX_DATA)
 	for i := 0; i < MAX_DATA; i++ {
-		originBytes[i] = byte(i)
+		originBytes[i] = byte(0)
 	}
 }
 
@@ -51,6 +61,33 @@ type ICMP struct {
 	Checksum    uint16 // 校验和
 	Identifier  uint16 // 标识符
 	SequenceNum uint16 // 序列号
+}
+
+// IP 首部
+type IP struct {
+	Version uint8 // 版本和首部长度  4(0100) + 20(0101) 01000101
+
+	TOS uint8 // 服务类型
+
+	TotalLen   uint16 // 总长度
+	Identifier uint16 // 标识符
+
+	Flags uint16 // 标志和片偏移
+
+	TTL      uint8  // 生存时间
+	Protocol uint8  // 协议
+	Checksum uint16 // 校验和
+	SrcAddr  uint32 // 源地址
+	DstAddr  uint32 // 目的地址
+}
+
+func IpStringToUint32(ipstr string) uint32 {
+	ip := net.ParseIP(ipstr)
+
+	ip = ip.To4()
+
+	ipUint32 := uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
+	return ipUint32
 }
 
 func CheckSum(data []byte) uint16 {
@@ -99,30 +136,44 @@ func PrintResult() {
 	}
 }
 
-func PingLoop(conn *net.IPConn, raddr *net.IPAddr, seq uint16) error {
+func PingLoop(conn *net.IPConn, seq uint16) error {
 	// 初始化 ICMP
 	icmp := ICMP{
 		Type:        8,
 		Code:        0,
 		Checksum:    0,
-		Identifier:  0,
+		Identifier:  seq,
 		SequenceNum: seq,
 	}
 
-	// 不需要设置IP首部，底层的网络协议栈会自动添加 IP 首部
+	ipHeader.TotalLen = uint16(20) + uint16(size+8)
+	ipHeader.SrcAddr = IpStringToUint32(conn.LocalAddr().String())
+	ipHeader.DstAddr = IpStringToUint32(conn.RemoteAddr().String())
+	ipHeader.Identifier = seq
 
-	// 序列化 ICMP
-	var buffer bytes.Buffer
-	binary.Write(&buffer, binary.BigEndian, icmp)
-	binary.Write(&buffer, binary.BigEndian, originBytes[:size])
+	// 序列化 IP
+	var ipBuffer bytes.Buffer
+
+	binary.Write(&ipBuffer, binary.BigEndian, ipHeader)
 
 	// 计算校验和
-	b := buffer.Bytes()
+	bb := ipBuffer.Bytes()
+	binary.BigEndian.PutUint16(bb[10:12], CheckSum(bb))
+
+	// 序列化 ICMP
+	var icmpBuffer bytes.Buffer
+
+	binary.Write(&icmpBuffer, binary.BigEndian, icmp)
+	binary.Write(&icmpBuffer, binary.BigEndian, originBytes[:size])
+
+	// 计算校验和(icmp)
+	b := icmpBuffer.Bytes()
 	binary.BigEndian.PutUint16(b[2:4], CheckSum(b))
 
-	recv := make([]byte, 1024)
+	recv := make([]byte, 2048)
 
-	if _, err := conn.Write(buffer.Bytes()); err != nil {
+	// 封装了底层的 IP 协议细节，并根据目标 IP 地址自动添加 IP 首部
+	if _, err := conn.Write(icmpBuffer.Bytes()); err != nil {
 		fmt.Println("发送失败, ", err)
 		return err
 	}
@@ -146,7 +197,7 @@ func PingLoop(conn *net.IPConn, raddr *net.IPAddr, seq uint16) error {
 		min_lan = dur
 	}
 
-	fmt.Printf("来自 %s 的回复: 字节=%d 时间=%.3fms\n", raddr.String(), len, dur)
+	fmt.Printf("来自 %s 的回复: 字节=%d 时间=%.3fms\n", conn.RemoteAddr().String(), len, dur)
 	return nil
 }
 
@@ -164,7 +215,7 @@ func Ping(url string) {
 	var raddr, err = net.ResolveIPAddr("ip4", url)
 
 	if err != nil {
-		log.Fatal("域名解析发生错误")
+		log.Fatal("域名解析发生错误/无效的IP地址")
 	}
 
 	// 创建原始的IP数据报连接
@@ -182,14 +233,14 @@ func Ping(url string) {
 
 	// 循环发送
 	for *isloop || count > 0 {
-		if err := PingLoop(conn, raddr, uint16(numPack)); err != nil {
+		if err := PingLoop(conn, uint16(numPack)); err != nil {
 			numPack++
 			dropPack++
 		} else {
 			numPack++
 		}
 		count--
-		time.Sleep(1 * time.Second)
+		time.Sleep(1000 * time.Millisecond)
 	}
 }
 
@@ -227,6 +278,11 @@ func main() {
 			log.Fatal("超时时间太短")
 		}
 
+		// size < Max_DATA
+		if size > MAX_DATA {
+			log.Fatalf("数据字段的字节数不能超过%d", MAX_DATA)
+		}
+
 		// 功能说明
 		if len(os.Args) < 2 {
 			fmt.Println("Usage: goping [-w timeout] [-l bytes] [-n count] [-t] domain")
@@ -241,12 +297,16 @@ func main() {
 		}
 
 		url := os.Args[len(os.Args)-1]
-		// www.xx.xx
-		pattern := `^www(\.[a-zA-Z0-9\-]+){2}$`
-		regexpObj, _ := regexp.Compile(pattern)
+		//www.xx.xx
+		pattern1 := `^www(\.[a-zA-Z0-9\-]+){2}$`
+		regexpObj1, _ := regexp.Compile(pattern1)
 
-		if !regexpObj.MatchString(url) {
-			log.Fatal("错误的域名参数/无域名参数")
+		// ipv4
+		pattern2 := `^(\d{1,3}\.){3}\d{1,3}$`
+		regexpObj2, _ := regexp.Compile(pattern2)
+
+		if !regexpObj1.MatchString(url) && !regexpObj2.MatchString(url) {
+			log.Fatal("错误的域名(ip)参数/无域名(ip)参数")
 		}
 
 		Ping(url)

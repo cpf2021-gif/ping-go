@@ -18,11 +18,11 @@ const (
 )
 
 var (
-	timeout int64  // 超时时间
-	size    int    // 发送的数据包的大小
-	count   int    // 发送请求的次数
-	isloop  *bool  // 无限请求
-	srcaddr string // 发送的源地址
+	timeout int64  = 1000 // 超时时间
+	size    int           // 发送的数据包的大小
+	count   int           // 发送请求的次数
+	isloop  *bool         // 无限请求
+	srcaddr string        // 发送的源地址
 )
 
 var (
@@ -114,7 +114,6 @@ func CheckSum(data []byte) uint16 {
 }
 
 func GetCommandArgs() {
-	flag.Int64Var(&timeout, "w", 1000, "Timeout")
 	flag.IntVar(&size, "l", 56, "Size")
 	flag.IntVar(&count, "n", 4, "Count")
 	flag.StringVar(&srcaddr, "S", "172.17.0.1", "Srcaddr")
@@ -273,11 +272,6 @@ func main() {
 			log.Fatal("参数设置错误")
 		}
 
-		// timeout > 10
-		if timeout < 10 {
-			log.Fatal("超时时间太短")
-		}
-
 		// size < Max_DATA
 		if size > MAX_DATA {
 			log.Fatalf("数据字段的字节数不能超过%d", MAX_DATA)
@@ -287,7 +281,6 @@ func main() {
 		if len(os.Args) < 2 {
 			fmt.Println("Usage: goping [-w timeout] [-l bytes] [-n count] [-t] domain")
 			fmt.Println("Options:")
-			fmt.Println("  -w timeout    指定超时时间，单位为毫秒")
 			fmt.Println("  -l bytes      指定发送的字节数")
 			fmt.Println("  -n count      指定要发送的回显请求数")
 			fmt.Println("  -t            无限循环发送请求，直到手动停止")

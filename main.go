@@ -48,7 +48,7 @@ var (
 )
 
 func init() {
-	originBytes = make([]byte, MAX_DATA)
+	originBytes = make([]byte, MAX_DATA) // MAX_DATA = 1392
 	for i := 0; i < MAX_DATA; i++ {
 		originBytes[i] = byte(0)
 	}
@@ -122,7 +122,8 @@ func GetCommandArgs() {
 }
 
 func PrintResult() {
-	fmt.Printf("数据包: 已发送 = %d, 已接收 = %d  丢包率: %.2f %% \n", int(numPack), (int(numPack) - int(dropPack)), float64(dropPack)/float64(numPack)*100)
+	fmt.Printf("数据包: 已发送 = %d, 已接收 = %d  丢包率: %.2f %% \n", 
+		int(numPack), (int(numPack) - int(dropPack)), float64(dropPack)/float64(numPack)*100)
 	if len(ret_list) == 0 {
 		fmt.Println("没有收到任何回复...")
 	} else {
@@ -205,7 +206,8 @@ func PingLoop(conn *net.IPConn, seq uint16) error {
 		min_lan = dur
 	}
 
-	fmt.Printf("来自 %s 的回复: 字节=%d 时间=%.3fms\n", conn.RemoteAddr().String(), len, dur)
+	fmt.Printf("来自 %s 的回复: 字节=%d 时间=%.3fms\n",
+		conn.RemoteAddr().String(), len, dur)
 	return nil
 }
 
@@ -235,7 +237,8 @@ func Ping(url string) {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("[%s] 正在 Ping %s [%s] 具有 %d(%d) 字节的数据:\n", srcaddr, url, raddr.String(), size, size+20+8)
+	fmt.Printf("[%s] 正在 Ping %s [%s] 具有 %d(%d) 字节的数据:\n", 
+		srcaddr, url, raddr.String(), size, size+20+8)
 
 	defer conn.Close()
 
